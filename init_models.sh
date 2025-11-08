@@ -1,41 +1,38 @@
 #!/bin/bash
-# === Model Initializer ===
-# Checks for required model files and downloads any that are missing.
+# === RunPod ComfyUI Model Setup (Fixed) ===
 
-set -e
-MODEL_DIR="/runpod-volume/models"
+echo "🔧 Setting up persistent model directories..."
 
-download_model () {
-    local URL=$1
-    local DEST=$2
-    if [ ! -f "$DEST" ]; then
-        echo "[init_models] Downloading $(basename "$DEST")..."
-        wget -q --show-progress -O "$DEST" "$URL"
-    else
-        echo "[init_models] Found existing $(basename "$DEST"), skipping."
-    fi
-}
+# 1. Create model folders in your persistent storage (volume)
+mkdir -p /runpod-volume/models/checkpoints
+mkdir -p /runpod-volume/models/loras
+mkdir -p /runpod-volume/models/controlnet
+mkdir -p /runpod-volume/workflows
+mkdir -p /runpod-volume/outputs
 
-echo "[init_models] Checking and downloading base models..."
+echo "✅ Created folders under /runpod-volume/models"
 
-# Flux Dev SDXL
-download_model "https://huggingface.co/lllyasviel/flux-dev-sdxl/resolve/main/flux-dev.safetensors" \
-  "$MODEL_DIR/flux/flux-dev.safetensors"
+# 2. Make sure ComfyUI models folder exists
+mkdir -p /workspace/ComfyUI/models
 
-# WAN 2.2 5B
-download_model "https://huggingface.co/Waniverse/WAN-2.2/resolve/main/wan-v2.2-5b.safetensors" \
-  "$MODEL_DIR/wan/wan-v2.2-5b.safetensors"
+# 3. Create symlinks (force overwrite if exist)
+ln -sfn /runpod-volume/models/checkpoints /workspace/ComfyUI/models/checkpoints
+ln -sfn /runpod-volume/models/loras /workspace/ComfyUI/models/loras
+ln -sfn /runpod-volume/models/controlnet /workspace/ComfyUI/models/controlnet
 
-# SDXL Base & Refiner
-download_model "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" \
-  "$MODEL_DIR/sdxl/sd_xl_base_1.0.safetensors"
-download_model "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors" \
-  "$MODEL_DIR/sdxl/sd_xl_refiner_1.0.safetensors"
+echo "✅ Symlinks created for checkpoints, loras, and controlnet"
 
-# ControlNet Depth + Canny
-download_model "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth" \
-  "$MODEL_DIR/controlnet/control_v11f1p_sd15_depth.pth"
-download_model "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth" \
-  "$MODEL_DIR/controlnet/control_v11p_sd15_canny.pth"
+# 4. Verify links
+echo "🔍 Verifying symbolic links..."
+ls -l /workspace/ComfyUI/models
 
-echo "[init_models] Model initialization complete."
+# 5. Create test file to verify persistence
+echo "test file" > /runpod-volume/models/test.txt
+
+if [ -f /workspace/ComfyUI/models/test.txt ]; then
+    echo "✅ Persistence check passed — linking is working!"
+else
+    echo "❌ Persistence check failed. Please verify /runpod-volume is mounted."
+fi
+
+echo "🎉 All done! You can now add models to /runpod-volume/models/"

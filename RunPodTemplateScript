@@ -1,0 +1,173 @@
+#!/bin-bash
+#
+# RunPod Startup Script for ComfyUI + Jupyter
+# Installs: ComfyUI, Flux Dev, Wan2.1 (Video Models)
+# AUTO-STARTS: ComfyUI on port 8188
+#
+set -e # Exit immediately if a command exits with a non-zero status.
+
+# --- 1. Configuration ---
+COMFY_DIR="/ComfyUI"
+PERSISTENT_DIR="/workspace/ComfyUI_Data"
+COMFY_LOG_FILE="/workspace/comfyui.log"
+
+
+# --- 2. Install System Dependencies ---
+echo "Updating apt and installing git & aria2 (for faster downloads)..."
+apt-get update
+apt-get install -y git aria2
+
+
+# --- 3. Clone ComfyUI (always clones to fast ephemeral storage) ---
+echo "Cloning ComfyUI repository..."
+if [ -d "$COMFY_DIR" ]; then
+    rm -rf $COMFY_DIR
+fi
+git clone https://github.com/comfyanonymous/ComfyUI.git $COMFY_DIR
+cd $COMFY_DIR
+
+
+# --- 4. Install ComfyUI Python Requirements ---
+echo "Installing ComfyUI Python requirements..."
+if [ -f "venv/bin/pip" ]; then
+    ./venv/bin/pip install -r requirements.txt
+else
+    pip install -r requirements.txt
+fi
+
+
+# --- 5. Create Persistent Directories & Symlink ---
+echo "Setting up persistent directories on network volume..."
+mkdir -p $PERSISTENT_DIR/models/checkpoints
+mkdir -p $PERSISTENT_DIR/models/flux
+mkdir -p $PERSISTENT_DIR/models/diffusion_models
+mkdir -p $PERSISTENT_DIR/models/text_encoders
+mkdir -p $PERSISTENT_DIR/models/vae
+mkdir -p $PERSISTENT_DIR/models/clip_vision
+mkdir -p $PERSISTENT_DIR/custom_nodes
+mkdir -p $PERSISTENT_DIR/output
+mkdir -p $PERSISTENT_DIR/input
+
+echo "Symlinking persistent directories..."
+rm -rf $COMFY_DIR/models
+rm -rf $COMFY_DIR/custom_nodes
+rm -rf $COMFY_DIR/output
+rm -rf $COMFY_DIR/input
+
+ln -s $PERSISTENT_DIR/models $COMFY_DIR/models
+ln -s $PERSISTENT_DIR/custom_nodes $COMFY_DIR/custom_nodes
+ln -s $PERSISTENT_DIR/output $COMFY_DIR/output
+ln -s $PERSISTENT_DIR/input $COMFY_DIR/input
+
+
+# --- 6. Download Custom Nodes (to Persistent Volume) ---
+echo "Checking and downloading custom nodes..."
+cd $COMFY_DIR/custom_nodes
+
+FLUX_NODE_DIR="ComfyUI-flux"
+if [ ! -d "$FLUX_NODE_DIR" ]; then
+    echo "Cloning $FLUX_NODE_DIR..."
+    git clone https://github.com/comfyanonymous/ComfyUI-flux.git $FLUX_NODE_DIR
+else
+    echo "$FLUX_NODE_DIR already exists. Pulling updates..."
+    (cd $FLUX_NODE_DIR && git pull)
+fi
+
+WAN_WRAPPER_DIR="ComfyUI-WanVideoWrapper"
+if [ ! -d "$WAN_WRAPPER_DIR" ]; then
+    echo "Cloning $WAN_WRAPPER_DIR..."
+    git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git $WAN_WRAPPER_DIR
+    echo "Installing $WAN_WRAPPER_DIR requirements..."
+    pip install -r $WAN_WRAPPER_DIR/requirements.txt
+else
+    echo "$WAN_WRAPPER_DIR already exists. Pulling updates..."
+    (cd $WAN_WRAPPER_DIR && git pull)
+fi
+
+VIDEO_HELPER_DIR="ComfyUI-VideoHelperSuite"
+if [ ! -d "$VIDEO_HELPER_DIR" ]; then
+    echo "Cloning $VIDEO_HELPER_DIR..."
+    git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git $VIDEO_HELPER_DIR
+else
+    echo "$VIDEO_HELPER_DIR already exists. Pulling updates..."
+    (cd $VIDEO_HELPER_DIR && git pull)
+fi
+
+
+# --- 7. Download Models (to Persistent Volume) ---
+echo "Checking and downloading models..."
+
+FLUX_MODEL_DIR="$COMFY_DIR/models/flux"
+cd $FLUX_MODEL_DIR
+FLUX_DEV_FILE="flux-dev.safetensors"
+if [ ! -f "$FLUX_DEV_FILE" ]; then
+    echo "Downloading $FLUX_DEV_FILE (5GB)..."
+    aria2c -x 16 -s 16 -k 1M \
+      "https://huggingface.co/comfyanonymous/ComfyUI_FLUX_dev/resolve/main/flux-dev.safetensors" \
+      -o "$FLUX_DEV_FILE"
+else
+    echo "$FLUX_DEV_FILE already exists."
+fi
+
+VAE_DIR="$COMFY_DIR/models/vae"
+cd $VAE_DIR
+VAE_FILE="Wan2_1_VAE_bf16.safetensors"
+if [ ! -f "$VAE_FILE" ]; then
+    echo "Downloading $VAE_FILE (254MB)..."
+    aria2c -x 16 -s 16 -k 1M \
+      "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors" \
+      -o "$VAE_FILE"
+else
+    echo "$VAE_FILE already exists."
+fi
+
+CLIP_DIR="$COMFY_DIR/models/clip_vision"
+cd $CLIP_DIR
+CLIP_FILE="clip_vision_h.safetensors"
+if [ ! -f "$CLIP_FILE" ]; then
+    echo "Downloading $CLIP_FILE (1.26GB)..."
+    aria2c -x 16 -s 16 -k 1M \
+      "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors" \
+      -o "$CLIP_FILE"
+else
+    echo "$CLIP_FILE already exists."
+fi
+
+DIFF_DIR="$COMFY_DIR/models/diffusion_models"
+cd $DIFF_DIR
+T2V_FILE="wan2.1_t2v_1.3B_fp16.safetensors"
+if [ ! -f "$T2V_FILE" ]; then
+    echo "Downloading $T2V_FILE (2.84GB)..."
+    aria2c -x 16 -s 16 -k 1M \
+      "https://huggingface.co/calcuis/wan-gguf/resolve/main/wan2.1_t2v_1.3b_fp16.safetensors" \
+      -o "$T2V_FILE"
+else
+    echo "$T2V_FILE already exists."
+fi
+
+echo "---"
+echo "SKIPPING 11GB and 32GB Wan2.1 models to prevent launch timeout."
+echo "To download them, open a terminal in your pod and run the 'aria2c' commands from the script."
+echo "---"
+
+
+# --- 8. Launch Services ---
+echo "--- Startup Script Finished ---"
+echo "Persistent data is in $PERSISTENT_DIR"
+echo "JupyterLab will start on port 8888."
+
+echo "Starting ComfyUI in the background on port 8188..."
+echo "ComfyUI logs will be at $COMFY_LOG_FILE"
+
+# Go to the ComfyUI directory
+cd $COMFY_DIR
+
+# Start ComfyUI in the background
+# - 'nohup' keeps it running even if the shell closes
+# - '>' redirects its output to a log file in your /workspace
+# - '2>&1' redirects errors to the same log file
+# - '&' runs the command in the background
+nohup python main.py --listen --port 8188 > $COMFY_LOG_FILE 2>&1 &
+
+echo "--- All services are launching. ---"
+# The RunPod base image will now start JupyterLab.

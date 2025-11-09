@@ -1,0 +1,44 @@
+#!/bin/bash
+set -e
+COMFY_DIR="/ComfyUI"
+PERSISTENT_DIR="/workspace/ComfyUI_Data"
+COMFY_LOG_FILE="/workspace/comfyui.log"
+apt-get update
+apt-get install -y git aria2
+if [ -d "$COMFY_DIR" ]; then rm -rf $COMFY_DIR; fi
+git clone https://github.com/comfyanonymous/ComfyUI.git $COMFY_DIR
+cd $COMFY_DIR
+if [ -f "venv/bin/pip" ]; then ./venv/bin/pip install -r requirements.txt; else pip install -r requirements.txt; fi
+mkdir -p $PERSISTENT_DIR/models/{checkpoints,flux,diffusion_models,text_encoders,vae,clip_vision,loras}
+mkdir -p $PERSISTENT_DIR/{custom_nodes,output,input}
+rm -rf $COMFY_DIR/{models,custom_nodes,output,input}
+ln -s $PERSISTENT_DIR/models $COMFY_DIR/models
+ln -s $PERSISTENT_DIR/custom_nodes $COMFY_DIR/custom_nodes
+ln -s $PERSISTENT_DIR/output $COMFY_DIR/output
+ln -s $PERSISTENT_DIR/input $COMFY_DIR/input
+cd $COMFY_DIR/custom_nodes
+FLUX_NODE_DIR="ComfyUI-flux"
+if [ ! -d "$FLUX_NODE_DIR" ]; then git clone https://github.com/comfyanonymous/ComfyUI-flux.git $FLUX_NODE_DIR; else (cd $FLUX_NODE_DIR && git pull); fi
+WAN_WRAPPER_DIR="ComfyUI-WanVideoWrapper"
+if [ ! -d "$WAN_WRAPPER_DIR" ]; then git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git $WAN_WRAPPER_DIR; pip install -r $WAN_WRAPPER_DIR/requirements.txt; else (cd $WAN_WRAPPER_DIR && git pull); fi
+VIDEO_HELPER_DIR="ComfyUI-VideoHelperSuite"
+if [ ! -d "$VIDEO_HELPER_DIR" ]; then git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git $VIDEO_HELPER_DIR; else (cd $VIDEO_HELPER_DIR && git pull); fi
+FLUX_MODEL_DIR="$COMFY_DIR/models/flux"
+cd $FLUX_MODEL_DIR
+FLUX_DEV_FILE="flux-dev.safetensors"
+if [ ! -f "$FLUX_DEV_FILE" ]; then aria2c -x 16 -s 16 -k 1M "https://huggingface.co/comfyanonymous/ComfyUI_FLUX_dev/resolve/main/flux-dev.safetensors" -o "$FLUX_DEV_FILE"; fi
+VAE_DIR="$COMFY_DIR/models/vae"
+cd $VAE_DIR
+VAE_FILE="Wan2_1_VAE_bf16.safetensors"
+if [ ! -f "$VAE_FILE" ]; then aria2c -x 16 -s 16 -k 1M "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors" -o "$VAE_FILE"; fi
+CLIP_DIR="$COMFY_DIR/models/clip_vision"
+cd $CLIP_DIR
+CLIP_FILE="clip_vision_h.safetensors"
+if [ ! -f "$CLIP_FILE" ]; then aria2c -x 16 -s 16 -k 1M "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors" -o "$CLIP_FILE"; fi
+DIFF_DIR="$COMFY_DIR/models/diffusion_models"
+cd $DIFF_DIR
+T2V_FILE="wan2.1_t2v_1.3B_fp16.safetensors"
+if [ ! -f "$T2V_FILE" ]; then aria2c -x 16 -s 16 -k 1M "https://huggingface.co/calcuis/wan-gguf/resolve/main/wan2.1_t2v_1.3b_fp16.safetensors" -o "$T2V_FILE"; fi
+cd $COMFY_DIR
+echo "Starting ComfyUI on 8188 & JupyterLab on 8888..."
+nohup python main.py --listen --port 8188 > $COMFY_LOG_FILE 2>&1 &
